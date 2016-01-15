@@ -10,8 +10,7 @@ class LearningAgent(Agent):
         super(LearningAgent, self).__init__(env)  # sets self.env = env, state = None, next_waypoint = None, and a default color
         self.color = 'red'  # override color
         self.planner = RoutePlanner(self.env, self)  # simple route planner to get next_waypoint
-        # TODO: Initialize any additional variables here
-        self.deadline = None
+        # Initialize any additional variables here
         self.next_waypoint = None
         self.total_reward = 0
 
@@ -27,10 +26,25 @@ class LearningAgent(Agent):
         inputs = self.env.sense(self)
         deadline = self.env.get_deadline(self)
 
-        # TODO: Update state
-
-        # TODO: Select action according to your policy
+        # Select random action
         action = random.choice(Environment.valid_actions)
+
+        # Update state
+        action_okay = True
+        if action == 'right':
+            if inputs['light'] == 'red' and inputs['left'] == 'forward':
+                action_okay = False
+        elif action == 'forward':
+            if inputs['light'] == 'red':
+                action_okay = False
+        elif action == 'left':
+            if inputs['light'] == 'red' or (inputs['oncoming'] == 'forward' or inputs['oncoming'] == 'right'):
+                action_okay = False
+
+        if not action_okay:
+            action = None
+            # action = self.next_waypoint
+            # self.next_waypoint = random.choice(Environment.valid_actions[1:])
 
         # Execute action and get reward
         reward = self.env.act(self, action)
@@ -50,7 +64,7 @@ def run():
     e.set_primary_agent(a, enforce_deadline=False)  # set agent to track
 
     # Now simulate it
-    sim = Simulator(e, update_delay=10)  # reduce update_delay to speed up simulation
+    sim = Simulator(e, update_delay=0)  # reduce update_delay to speed up simulation
     sim.run(n_trials=1)  # press Esc or close pygame window to quit
 
 
