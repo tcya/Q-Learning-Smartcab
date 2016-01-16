@@ -35,6 +35,8 @@ class Environment(object):
         self.t = 0
         self.agent_states = OrderedDict()
         self.status_text = ""
+        self.start = None
+        self.destination = None
 
         # Road network
         self.grid_size = (8, 6)  # (cols, rows)
@@ -42,6 +44,7 @@ class Environment(object):
         self.block_size = 100
         self.intersections = OrderedDict()
         self.roads = []
+        self.q_table = Q_table(self)
         for x in xrange(self.bounds[0], self.bounds[2] + 1):
             for y in xrange(self.bounds[1], self.bounds[3] + 1):
                 self.intersections[(x, y)] = TrafficLight()  # a traffic light at each intersection
@@ -80,13 +83,18 @@ class Environment(object):
             traffic_light.reset()
 
         # Pick a start and a destination
-        start = random.choice(self.intersections.keys())
-        destination = random.choice(self.intersections.keys())
+        # start = random.choice(self.intersections.keys())
+        # destination = random.choice(self.intersections.keys())
+        start = self.start if self.start else random.choice(self.intersections.keys())
+        destination = self.destination if self.destination else random.choice(self.intersections.keys())
 
         # Ensure starting location and destination are not too close
         while self.compute_dist(start, destination) < 4:
             start = random.choice(self.intersections.keys())
             destination = random.choice(self.intersections.keys())
+
+        self.start = start
+        self.destination = destination
 
         start_heading = random.choice(self.valid_headings)
         deadline = self.compute_dist(start, destination) * 5
@@ -186,20 +194,25 @@ class Environment(object):
         else:
             reward = 1
 
+        reward = -1 if action else 0 # override reward. Now punish every move
+
         if agent is self.primary_agent:
             if state['location'] == state['destination']:
                 if state['deadline'] >= 0:
                     reward += 10  # bonus
-                self.done = True
                 print "Environment.act(): Primary agent has reached destination!"  # [debug]
+                print "Optimal policy has {} steps. Current policy has {} steps. Total reward is {}.".format(self.compute_dist(self.start, self.destination), (agent.get_state())[0]+1, (agent.get_state())[1]+9) # Adjust for the last step
+                self.done = True
             self.status_text = "state: {}\naction: {}\nreward: {}".format(agent.get_state(), action, reward)
             #print "Environment.act() [POST]: location: {}, heading: {}, action: {}, reward: {}".format(location, heading, action, reward)  # [debug]
 
         return reward
 
     def compute_dist(self, a, b):
-        """L1 distance between two points."""
-        return abs(b[0] - a[0]) + abs(b[1] - a[1])
+        """L1 distance between two points, considering periodic boundary condition."""
+        min_steps = min(abs(a[0] - b[0]), self.grid_size[0] - abs(a[0] - b[0])) + min(abs(a[1] - b[1]), self.grid_size[1] - abs(a[1] - b[1]))
+        # return abs(b[0] - a[0]) + abs(b[1] - a[1])
+        return min_steps
 
 
 class Agent(object):
@@ -239,7 +252,8 @@ class DummyAgent(Agent):
         if self.next_waypoint == 'right':
             if inputs['light'] == 'red' and inputs['left'] == 'forward':
                 action_okay = False
-        elif self.next_waypoint == 'forward': # This should be 'forward' to agree to planner.py
+        # elif self.next_waypoint == 'straight': # This should be 'forward' to agree to planner.py
+        elif self.next_waypoint == 'forward':
             if inputs['light'] == 'red':
                 action_okay = False
         elif self.next_waypoint == 'left':
@@ -253,3 +267,41 @@ class DummyAgent(Agent):
         reward = self.env.act(self, action)
         #print "DummyAgent.update(): t = {}, inputs = {}, action = {}, reward = {}".format(t, inputs, action, reward)  # [debug]
         #print "DummyAgent.update(): next_waypoint = {}".format(self.next_waypoint)  # [debug]
+
+class Q_table(object):
+    def __init__(self, env):
+        self.env = env
+        self.grid_size = env.grid_size  # (cols, rows)
+        self.bounds = env.bounds
+        self.q_vals = {}
+        for col in range(1, self.grid_size[0] + 1):
+            for row in range(1, self.grid_size[1] + 1):
+                self.q_vals[(col, row)] = {'south':0, 'north':0, 'east':0, 'west':0} # Initialize Q table with zeros
+
+    def update(self, prev_loc, heading, reward, learning_rate=0.7, discount_factor=0.8):
+        curr_loc = self.env.agent_states[self.env.primary_agent]['location'] # current location
+        heading_to_direction = {(1,0):'east', (0,1):'south', (-1,0):'west', (0,-1):'north'}
+        direction = heading_to_direction[heading]
+        self.q_vals[prev_loc][direction] = learning_rate * (reward + discount_factor * max(self.q_vals[curr_loc].values())) + (1 - learning_rate) * self.q_vals[prev_loc][direction]
+
+    def next_move(self, location, heading):
+        Qs = self.q_vals[location].copy()
+        heading_to_direction = {(1,0):'east', (0,1):'south', (-1,0):'west', (0,-1):'north'}
+        direction_to_heading = {'west': (-1, 0), 'east': (1, 0), 'north': (0, -1), 'south': (0, 1)}
+        forbidden_move = heading_to_direction[(-heading[0], -heading[1])]
+        del Qs[forbidden_move]
+        maxQ = max(Qs.values())
+        good_moves = [m for m, v in Qs.items() if v == maxQ]
+        direction = random.choice(good_moves)
+        new_heading = direction_to_heading[direction]
+        if heading == new_heading:
+            action = 'forward'
+        elif (-heading[1], heading[0]) == new_heading:
+            action = 'right'
+        else:
+            action = 'left'
+        return (action, new_heading)
+
+
+
+
