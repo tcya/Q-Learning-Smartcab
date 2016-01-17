@@ -51,7 +51,7 @@ class LearningAgent(Agent):
 
         # Execute action and get reward
         reward = self.env.act(self, action)
-        self.env.q_table.update(location, new_heading, reward)
+        self.env.q_table.update(location, new_heading, reward, learning_rate=0.5, discount_factor=0.8)
 
         if action:
             self.state[0] += 1
